@@ -1,7 +1,7 @@
-use std::collections::HashMap;
-use std::env;
 use std::fs::File;
-use std::io::{Read, Write};
+use std::io::Write;
+use std::{collections::HashMap, io::BufRead};
+use std::{env, io::BufReader};
 
 fn predefined_symbols() -> HashMap<&'static str, u16> {
     let mut symbols: HashMap<&str, u16> = HashMap::new();
@@ -93,30 +93,18 @@ fn jumps(jump: &str) -> &str {
     }
 }
 
-fn main() {
-    let args: Vec<String> = env::args().collect();
-    if args.len() < 2 {
-        println!("Please provide a file path as a command-line argument");
-        return;
-    }
-    let file_path = &args[1];
-
-    let mut file = File::open(file_path).expect("Error opening file");
-    let mut contents = String::new();
-    file.read_to_string(&mut contents)
-        .expect("Error reading file");
-    let contents = contents;
-
-    let output_file_path = format!("{}.hack", file_path.trim_end_matches(".asm"));
-    let mut dest_file = File::create(output_file_path).expect("Error creating output file");
-
+fn assemble(input: impl BufRead, output: &mut impl Write) -> Result<(), std::io::Error> {
     let mut symbol_table = predefined_symbols();
     let mut next_address: u16 = 16; // for user-defined symbols
 
     let mut program_length = 0; // where labels point to
 
+    // read file into memory
+    let lines: Result<Vec<_>, _> = input.lines().collect();
+    let lines = lines?;
+
     // first pass: add labels to symbol table
-    for line in contents.lines() {
+    for line in &lines {
         // skip comments and empty lines
         if line.starts_with("//") || line.is_empty() {
             continue;
@@ -133,27 +121,27 @@ fn main() {
     }
 
     // second pass: generate binary instructions
-    for line in contents.lines() {
+    for line in &lines {
         let line = line.trim();
         if line.starts_with("(") || line.starts_with("//") || line.is_empty() {
             continue;
         }
 
-        let result = if line.starts_with("@") {
+        if line.starts_with("@") {
             // A-instruction
             let value = line.trim_start_matches("@");
             if let Ok(value) = value.parse::<u16>() {
                 // plain memory address
-                format!("{:016b}", value)
+                writeln!(output, "{:016b}", value)?;
             } else if let Some(value) = symbol_table.get(value) {
                 // existing symbol
-                format!("{:016b}", value)
+                writeln!(output, "{:016b}", value)?;
             } else {
                 // new symbol
                 let address = next_address;
                 next_address += 1;
                 symbol_table.insert(value, address);
-                format!("{:016b}", address)
+                writeln!(output, "{:016b}", address)?;
             }
         } else {
             // split C-instruction into dest, comp, and jump
@@ -174,13 +162,44 @@ fn main() {
             dest = destinations(dest);
             comp = computations(comp);
             jump = jumps(jump);
-            format!("111{}{}{}", comp, dest, jump)
+            writeln!(output, "111{}{}{}", comp, dest, jump)?;
         };
-
-        dest_file
-            .write_all(format!("{}\n", result).as_bytes())
-            .expect("Error writing to output file");
     }
 
+    Ok(())
+}
+
+fn main() {
+    let args: Vec<String> = env::args().collect();
+    if args.len() < 2 {
+        println!("Please provide a file path as a command-line argument");
+        return;
+    }
+
+    let input_file_path = &args[1];
+    let mut input_file = File::open(input_file_path).expect("Error opening file");
+
+    let output_file_path = format!("{}.hack", input_file_path.trim_end_matches(".asm"));
+    let mut output_file = File::create(output_file_path).expect("Error creating output file");
+
+    assemble(BufReader::new(&mut input_file), &mut output_file)
+        .expect("Error writing to output file");
+
     println!("Done!");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{fs::File, io::BufReader};
+
+    #[test]
+    fn rect() {
+        let mut result = Vec::new();
+        let mut rect = File::open("resources/Rect.asm").unwrap();
+        assemble(BufReader::new(&mut rect), &mut result).unwrap();
+
+        let expected = std::fs::read("resources/Rect.hack").unwrap();
+        assert_eq!(result, expected);
+    }
 }
