@@ -110,9 +110,9 @@ fn assemble(input: impl BufRead, output: &mut impl Write) -> Result<(), std::io:
             continue;
         }
 
-        if line.starts_with("(") {
+        if line.starts_with('(') {
             // line is a label
-            let label = line.trim_start_matches("(").trim_end_matches(")");
+            let label = line.trim_start_matches('(').trim_end_matches(')');
             symbol_table.insert(label, program_length);
         } else {
             // label lines shouldn't contribute to program length
@@ -123,13 +123,13 @@ fn assemble(input: impl BufRead, output: &mut impl Write) -> Result<(), std::io:
     // second pass: generate binary instructions
     for line in &lines {
         let line = line.trim();
-        if line.starts_with("(") || line.starts_with("//") || line.is_empty() {
+        if line.starts_with('(') || line.starts_with("//") || line.is_empty() {
             continue;
         }
 
-        if line.starts_with("@") {
+        if line.starts_with('@') {
             // A-instruction
-            let value = line.trim_start_matches("@");
+            let value = line.trim_start_matches('@');
             if let Ok(value) = value.parse::<u16>() {
                 // plain memory address
                 writeln!(output, "{:016b}", value)?;
@@ -148,14 +148,14 @@ fn assemble(input: impl BufRead, output: &mut impl Write) -> Result<(), std::io:
             let mut dest = "";
             let mut comp = "";
             let mut jump = "";
-            if line.contains("=") {
+            if line.contains('=') {
                 // instruction has a destination
-                let parts: Vec<&str> = line.split("=").collect();
+                let parts: Vec<&str> = line.split('=').collect();
                 dest = parts[0];
                 comp = parts[1];
-            } else if line.contains(";") {
+            } else if line.contains(';') {
                 // instruction has a jump
-                let parts: Vec<&str> = line.split(";").collect();
+                let parts: Vec<&str> = line.split(';').collect();
                 comp = parts[0];
                 jump = parts[1];
             }
