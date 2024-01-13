@@ -3,33 +3,31 @@ use std::io::Write;
 use std::{collections::HashMap, io::BufRead};
 use std::{env, io::BufReader};
 
-fn predefined_symbols() -> HashMap<&'static str, u16> {
-    let mut symbols: HashMap<&str, u16> = HashMap::new();
-    symbols.insert("SP", 0);
-    symbols.insert("LCL", 1);
-    symbols.insert("ARG", 2);
-    symbols.insert("THIS", 3);
-    symbols.insert("THAT", 4);
-    symbols.insert("R0", 0);
-    symbols.insert("R1", 1);
-    symbols.insert("R2", 2);
-    symbols.insert("R3", 3);
-    symbols.insert("R4", 4);
-    symbols.insert("R5", 5);
-    symbols.insert("R6", 6);
-    symbols.insert("R7", 7);
-    symbols.insert("R8", 8);
-    symbols.insert("R9", 9);
-    symbols.insert("R10", 10);
-    symbols.insert("R11", 11);
-    symbols.insert("R12", 12);
-    symbols.insert("R13", 13);
-    symbols.insert("R14", 14);
-    symbols.insert("R15", 15);
-    symbols.insert("SCREEN", 16384);
-    symbols.insert("KBD", 24576);
-    symbols
-}
+const PREDEFINED_SYMBOLS: [(&str, u16); 23] = [
+    ("SP", 0),
+    ("LCL", 1),
+    ("ARG", 2),
+    ("THIS", 3),
+    ("THAT", 4),
+    ("R0", 0),
+    ("R1", 1),
+    ("R2", 2),
+    ("R3", 3),
+    ("R4", 4),
+    ("R5", 5),
+    ("R6", 6),
+    ("R7", 7),
+    ("R8", 8),
+    ("R9", 9),
+    ("R10", 10),
+    ("R11", 11),
+    ("R12", 12),
+    ("R13", 13),
+    ("R14", 14),
+    ("R15", 15),
+    ("SCREEN", 16384),
+    ("KBD", 24576),
+];
 
 fn destinations(dest: &str) -> &str {
     match dest {
@@ -94,7 +92,7 @@ fn jumps(jump: &str) -> &str {
 }
 
 fn assemble(input: impl BufRead, output: &mut impl Write) -> Result<(), std::io::Error> {
-    let mut symbol_table = predefined_symbols();
+    let mut symbol_table: HashMap<&str, u16> = HashMap::from(PREDEFINED_SYMBOLS);
     let mut next_address: u16 = 16; // for user-defined symbols
 
     let mut program_length = 0; // where labels point to
