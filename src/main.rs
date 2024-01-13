@@ -3,6 +3,8 @@ use std::io::Write;
 use std::{collections::HashMap, io::BufRead};
 use std::{env, io::BufReader};
 
+use itertools::Itertools;
+
 const PREDEFINED_SYMBOLS: [(&str, u16); 23] = [
     ("SP", 0),
     ("LCL", 1),
@@ -98,16 +100,16 @@ fn assemble(input: impl BufRead, output: &mut impl Write) -> Result<(), std::io:
     let mut program_length = 0; // where labels point to
 
     // read file into memory
-    let lines: Result<Vec<_>, _> = input.lines().collect();
+    let lines: Result<Vec<_>, _> = input
+        .lines()
+        // filter out comments and empty lines
+        .filter_ok(|line| !line.trim().starts_with("//") && !line.is_empty())
+        .collect();
     let lines = lines?;
 
     // first pass: add labels to symbol table
     for line in &lines {
-        // skip comments and empty lines
-        if line.starts_with("//") || line.is_empty() {
-            continue;
-        }
-
+        let line = line.trim();
         if line.starts_with('(') {
             // line is a label
             let label = line.trim_start_matches('(').trim_end_matches(')');
@@ -121,7 +123,7 @@ fn assemble(input: impl BufRead, output: &mut impl Write) -> Result<(), std::io:
     // second pass: generate binary instructions
     for line in &lines {
         let line = line.trim();
-        if line.starts_with('(') || line.starts_with("//") || line.is_empty() {
+        if line.starts_with('(') {
             continue;
         }
 
