@@ -134,6 +134,7 @@ fn main() {
 
     // second pass: generate binary instructions
     for line in contents.lines() {
+        let line = line.trim();
         if line.starts_with("(") || line.starts_with("//") || line.is_empty() {
             continue;
         }
