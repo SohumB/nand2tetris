@@ -93,12 +93,54 @@ fn jumps(jump: &str) -> &str {
     }
 }
 
+struct SymbolTable<'data> {
+    labels: HashMap<&'data str, u16>,
+    variables: HashMap<&'data str, u16>,
+    variable_address: u16,
+}
+
+impl<'data> SymbolTable<'data> {
+    // by taking an `Iterator`, we guarantee to our caller that we
+    // iterate at most once
+    fn new<I>(iter: I) -> Self
+    where
+        I: IntoIterator<Item = &'data String>,
+    {
+        let mut labels = HashMap::from(PREDEFINED_SYMBOLS);
+        let mut program_length = 0; // where labels point to
+
+        for line in iter.into_iter() {
+            let line = line.trim();
+            if line.starts_with('(') {
+                // line is a label
+                let label = line.trim_start_matches('(').trim_end_matches(')');
+                labels.insert(label, program_length);
+            } else {
+                // label lines shouldn't contribute to program length
+                program_length += 1
+            }
+        }
+
+        Self {
+            labels,
+            variables: HashMap::new(),
+            variable_address: 16,
+        }
+    }
+
+    fn label(&mut self, key: &'data str) -> Option<u16> {
+        self.labels.get(key).copied()
+    }
+
+    // this function will always alloc a new variable if one doesn't already exist
+    fn variable<'slf>(&'slf mut self, key: &'data str) -> u16 {
+        let ret = self.variables.entry(key).or_insert(self.variable_address);
+        self.variable_address += 1;
+        *ret
+    }
+}
+
 fn assemble(input: impl BufRead, output: &mut impl Write) -> Result<(), std::io::Error> {
-    let mut symbol_table: HashMap<&str, u16> = HashMap::from(PREDEFINED_SYMBOLS);
-    let mut next_address: u16 = 16; // for user-defined symbols
-
-    let mut program_length = 0; // where labels point to
-
     // read file into memory
     let lines: Result<Vec<_>, _> = input
         .lines()
@@ -107,18 +149,8 @@ fn assemble(input: impl BufRead, output: &mut impl Write) -> Result<(), std::io:
         .collect();
     let lines = lines?;
 
-    // first pass: add labels to symbol table
-    for line in &lines {
-        let line = line.trim();
-        if line.starts_with('(') {
-            // line is a label
-            let label = line.trim_start_matches('(').trim_end_matches(')');
-            symbol_table.insert(label, program_length);
-        } else {
-            // label lines shouldn't contribute to program length
-            program_length += 1
-        }
-    }
+    // first pass: collect labels into a symbol table
+    let mut symbols = SymbolTable::new(&lines);
 
     // second pass: generate binary instructions
     for line in &lines {
@@ -130,19 +162,17 @@ fn assemble(input: impl BufRead, output: &mut impl Write) -> Result<(), std::io:
         if line.starts_with('@') {
             // A-instruction
             let value = line.trim_start_matches('@');
-            if let Ok(value) = value.parse::<u16>() {
+            let address = if let Ok(value) = value.parse::<u16>() {
                 // plain memory address
-                writeln!(output, "{:016b}", value)?;
-            } else if let Some(value) = symbol_table.get(value) {
-                // existing symbol
-                writeln!(output, "{:016b}", value)?;
+                value
+            } else if let Some(address) = symbols.label(value) {
+                // existing label
+                address
             } else {
-                // new symbol
-                let address = next_address;
-                next_address += 1;
-                symbol_table.insert(value, address);
-                writeln!(output, "{:016b}", address)?;
-            }
+                // variable (whether existing or new)
+                symbols.variable(value)
+            };
+            writeln!(output, "{:016b}", address)?;
         } else {
             // split C-instruction into dest, comp, and jump
             let mut dest = "";
