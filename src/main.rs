@@ -226,7 +226,7 @@ impl FromStr for HackLine {
     type Err = Box<dyn Error>;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let s = s.trim();
+        let s = s.split("//").next().unwrap_or(s).trim();
         if s.starts_with('(') {
             // line is a label
             let label = s.trim_start_matches('(').trim_end_matches(')');
