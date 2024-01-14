@@ -175,24 +175,28 @@ fn assemble(input: impl BufRead, output: &mut impl Write) -> Result<(), std::io:
             writeln!(output, "{:016b}", address)?;
         } else {
             // split C-instruction into dest, comp, and jump
-            let mut dest = "";
-            let mut comp = "";
-            let mut jump = "";
-            if line.contains('=') {
-                // instruction has a destination
-                let parts: Vec<&str> = line.split('=').collect();
-                dest = parts[0];
-                comp = parts[1];
-            } else if line.contains(';') {
-                // instruction has a jump
-                let parts: Vec<&str> = line.split(';').collect();
-                comp = parts[0];
-                jump = parts[1];
-            }
-            dest = destinations(dest);
-            comp = computations(comp);
-            jump = jumps(jump);
-            writeln!(output, "111{}{}{}", comp, dest, jump)?;
+            let (dest, comp, jump) = {
+                let (dest, comp) = match line.split('=').collect_vec()[..] {
+                    [comp] => ("", comp),
+                    [dest, comp] => (dest, comp),
+                    _ => panic!("more than one equal sign in instruction"),
+                };
+
+                let (comp, jump) = match comp.split(';').collect_vec()[..] {
+                    [comp] => (comp, ""),
+                    [comp, jump] => (comp, jump),
+                    _ => panic!("more than one ; in instruction"),
+                };
+
+                (dest, comp, jump)
+            };
+            writeln!(
+                output,
+                "111{}{}{}",
+                computations(comp),
+                destinations(dest),
+                jumps(jump)
+            )?;
         };
     }
 
