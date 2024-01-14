@@ -1,3 +1,5 @@
+use core::str::FromStr;
+use std::error::Error;
 use std::fs::File;
 use std::io::Write;
 use std::{collections::HashMap, io::BufRead};
@@ -31,65 +33,264 @@ const PREDEFINED_SYMBOLS: [(&str, u16); 23] = [
     ("KBD", 24576),
 ];
 
-fn destinations(dest: &str) -> &str {
-    match dest {
-        "" => "000",
-        "M" => "001",
-        "D" => "010",
-        "MD" => "011",
-        "A" => "100",
-        "AM" => "101",
-        "AD" => "110",
-        "AMD" => "111",
-        _ => panic!("Invalid dest: {}", dest),
+trait Assemble {
+    fn assemble<'slf>(
+        &'slf self,
+        table: &mut SymbolTable<'slf>,
+        writer: &mut impl Write,
+    ) -> Result<(), std::io::Error>;
+}
+
+#[allow(clippy::upper_case_acronyms)]
+#[derive(Debug, Clone, Copy, parse_display::FromStr)]
+enum Destination {
+    Null,
+    M,
+    D,
+    MD,
+    A,
+    AM,
+    AD,
+    AMD,
+}
+
+impl Assemble for Destination {
+    fn assemble(
+        &self,
+        _table: &mut SymbolTable,
+        writer: &mut impl Write,
+    ) -> Result<(), std::io::Error> {
+        write!(writer, "{:03b}", *self as u8)
     }
 }
 
-fn computations(comp: &str) -> &str {
-    match comp {
-        "0" => "0101010",
-        "1" => "0111111",
-        "-1" => "0111010",
-        "D" => "0001100",
-        "A" => "0110000",
-        "M" => "1110000",
-        "!D" => "0001101",
-        "!A" => "0110001",
-        "!M" => "1110001",
-        "-D" => "0001111",
-        "-A" => "0110011",
-        "-M" => "1110011",
-        "D+1" => "0011111",
-        "A+1" => "0110111",
-        "M+1" => "1110111",
-        "D-1" => "0001110",
-        "A-1" => "0110010",
-        "M-1" => "1110010",
-        "D+A" => "0000010",
-        "D+M" => "1000010",
-        "D-A" => "0010011",
-        "D-M" => "1010011",
-        "A-D" => "0000111",
-        "M-D" => "1000111",
-        "D&A" => "0000000",
-        "D&M" => "1000000",
-        "D|A" => "0010101",
-        "D|M" => "1010101",
-        _ => panic!("Invalid comp: {}", comp),
+#[allow(clippy::upper_case_acronyms)]
+#[derive(Debug, Clone, Copy, parse_display::FromStr)]
+enum Jump {
+    Null,
+    JGT,
+    JEQ,
+    JGE,
+    JLT,
+    JNE,
+    JLE,
+    JMP,
+}
+
+impl Assemble for Jump {
+    fn assemble(
+        &self,
+        _table: &mut SymbolTable,
+        writer: &mut impl Write,
+    ) -> Result<(), std::io::Error> {
+        write!(writer, "{:03b}", *self as u8)
     }
 }
 
-fn jumps(jump: &str) -> &str {
-    match jump {
-        "" => "000",
-        "JGT" => "001",
-        "JEQ" => "010",
-        "JGE" => "011",
-        "JLT" => "100",
-        "JNE" => "101",
-        "JLE" => "110",
-        "JMP" => "111",
-        _ => panic!("Invalid jump: {}", jump),
+#[derive(Debug, Clone, Copy, parse_display::FromStr)]
+enum AM {
+    A,
+    M,
+}
+
+impl Assemble for AM {
+    fn assemble(
+        &self,
+        _table: &mut SymbolTable,
+        writer: &mut impl Write,
+    ) -> Result<(), std::io::Error> {
+        write!(writer, "{:b}", *self as u8)
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum Computation {
+    Zero,
+    One,
+    Neg1,
+    D,
+    X(AM),
+    NegD,
+    NegX(AM),
+    DPlusOne,
+    XPlusOne(AM),
+    DMinusOne,
+    XMinusOne(AM),
+    DPlusX(AM),
+    DMinusX(AM),
+    XMinusD(AM),
+    NotD,
+    NotX(AM),
+    DAndX(AM),
+    DOrX(AM),
+}
+
+impl FromStr for Computation {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        use Computation as C;
+        match s {
+            "0" => Ok(C::Zero),
+            "1" => Ok(C::One),
+            "-1" => Ok(C::Neg1),
+            "D" => Ok(C::D),
+            "A" => Ok(C::X(AM::A)),
+            "M" => Ok(C::X(AM::M)),
+            "!D" => Ok(C::NotD),
+            "!A" => Ok(C::NotX(AM::A)),
+            "!M" => Ok(C::NotX(AM::M)),
+            "-D" => Ok(C::NegD),
+            "-A" => Ok(C::NegX(AM::A)),
+            "-M" => Ok(C::NegX(AM::M)),
+            "D+1" => Ok(C::DPlusOne),
+            "A+1" => Ok(C::XPlusOne(AM::A)),
+            "M+1" => Ok(C::XPlusOne(AM::M)),
+            "D-1" => Ok(C::DMinusOne),
+            "A-1" => Ok(C::XMinusOne(AM::A)),
+            "M-1" => Ok(C::XMinusOne(AM::M)),
+            "D+A" => Ok(C::DPlusX(AM::A)),
+            "D+M" => Ok(C::DPlusX(AM::M)),
+            "D-A" => Ok(C::DMinusX(AM::A)),
+            "D-M" => Ok(C::DMinusX(AM::M)),
+            "A-D" => Ok(C::XMinusD(AM::A)),
+            "M-D" => Ok(C::XMinusD(AM::M)),
+            "D&A" => Ok(C::DAndX(AM::A)),
+            "D&M" => Ok(C::DAndX(AM::M)),
+            "D|A" => Ok(C::DOrX(AM::A)),
+            "D|M" => Ok(C::DOrX(AM::M)),
+            other => Err(format!("Invalid comp: {}", other)),
+        }
+    }
+}
+
+impl Assemble for Computation {
+    fn assemble<'slf>(
+        &'slf self,
+        table: &mut SymbolTable<'slf>,
+        writer: &mut impl Write,
+    ) -> Result<(), std::io::Error> {
+        use Computation as C;
+        if let C::X(x)
+        | C::NegX(x)
+        | C::XPlusOne(x)
+        | C::XMinusOne(x)
+        | C::XMinusD(x)
+        | C::DPlusX(x)
+        | C::DMinusX(x)
+        | C::NotX(x)
+        | C::DAndX(x)
+        | C::DOrX(x) = self
+        {
+            x.assemble(table, writer)?;
+        } else {
+            write!(writer, "0")?;
+        };
+
+        write!(
+            writer,
+            "{}",
+            match self {
+                Computation::Zero => "101010",
+                Computation::One => "111111",
+                Computation::Neg1 => "111010",
+                Computation::D => "001100",
+                Computation::X(_) => "110000",
+                Computation::NegD => "001111",
+                Computation::NegX(_) => "110011",
+                Computation::DPlusOne => "011111",
+                Computation::XPlusOne(_) => "110111",
+                Computation::DMinusOne => "001110",
+                Computation::XMinusOne(_) => "110010",
+                Computation::DPlusX(_) => "000010",
+                Computation::DMinusX(_) => "010011",
+                Computation::XMinusD(_) => "000111",
+                Computation::NotD => "001101",
+                Computation::NotX(_) => "110001",
+                Computation::DAndX(_) => "000000",
+                Computation::DOrX(_) => "010101",
+            }
+        )
+    }
+}
+
+#[derive(Debug, Clone)]
+enum HackLine {
+    Label(String),
+    AImmediate(u16),
+    ALocation(String),
+    C(Computation, Destination, Jump),
+}
+
+impl FromStr for HackLine {
+    type Err = Box<dyn Error>;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let s = s.trim();
+        if s.starts_with('(') {
+            // line is a label
+            let label = s.trim_start_matches('(').trim_end_matches(')');
+            Ok(Self::Label(label.to_owned()))
+        } else if s.starts_with('@') {
+            // A-instruction
+            let value = s.trim_start_matches('@');
+            Ok(if let Ok(imm) = value.parse::<u16>() {
+                // plain memory address
+                Self::AImmediate(imm)
+            } else {
+                // location
+                Self::ALocation(value.to_owned())
+            })
+        } else {
+            // split C-instruction into dest, comp, and jump
+            let (dest, comp, jump) = {
+                let (dest, comp) = match s.split('=').collect_vec()[..] {
+                    [comp] => (Destination::Null, comp),
+                    [dest, comp] => (dest.parse()?, comp),
+                    _ => Err("more than one equal sign in instruction")?,
+                };
+
+                let (comp, jump) = match comp.split(';').collect_vec()[..] {
+                    [comp] => (comp, Jump::Null),
+                    [comp, jump] => (comp, jump.parse()?),
+                    _ => Err("more than one ; in instruction")?,
+                };
+
+                (dest, comp.parse()?, jump)
+            };
+            Ok(Self::C(comp, dest, jump))
+        }
+    }
+}
+
+impl Assemble for HackLine {
+    fn assemble<'slf>(
+        &'slf self,
+        table: &mut SymbolTable<'slf>,
+        writer: &mut impl Write,
+    ) -> Result<(), std::io::Error> {
+        match self {
+            HackLine::Label(_) => {}
+            HackLine::AImmediate(imm) => writeln!(writer, "{:016b}", imm)?,
+            HackLine::ALocation(name) => {
+                let address = if let Some(address) = table.label(name) {
+                    // existing label
+                    address
+                } else {
+                    // variable (allocating a new one if it doesn't already exist)
+                    table.variable(name)
+                };
+                writeln!(writer, "{:016b}", address)?
+            }
+            HackLine::C(c, d, j) => {
+                write!(writer, "111")?;
+                c.assemble(table, writer)?;
+                d.assemble(table, writer)?;
+                j.assemble(table, writer)?;
+                writeln!(writer)?;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -104,16 +305,13 @@ impl<'data> SymbolTable<'data> {
     // iterate at most once
     fn new<I>(iter: I) -> Self
     where
-        I: IntoIterator<Item = &'data String>,
+        I: IntoIterator<Item = &'data HackLine>,
     {
         let mut labels = HashMap::from(PREDEFINED_SYMBOLS);
         let mut program_length = 0; // where labels point to
 
         for line in iter.into_iter() {
-            let line = line.trim();
-            if line.starts_with('(') {
-                // line is a label
-                let label = line.trim_start_matches('(').trim_end_matches(')');
+            if let HackLine::Label(label) = line {
                 labels.insert(label, program_length);
             } else {
                 // label lines shouldn't contribute to program length
@@ -140,12 +338,14 @@ impl<'data> SymbolTable<'data> {
     }
 }
 
-fn assemble(input: impl BufRead, output: &mut impl Write) -> Result<(), std::io::Error> {
+fn assemble(input: impl BufRead, output: &mut impl Write) -> Result<(), Box<dyn Error>> {
     // read file into memory
     let lines: Result<Vec<_>, _> = input
         .lines()
         // filter out comments and empty lines
         .filter_ok(|line| !line.trim().starts_with("//") && !line.is_empty())
+        .map_ok(|line| line.parse::<HackLine>())
+        .map(|res| res?)
         .collect();
     let lines = lines?;
 
@@ -154,50 +354,7 @@ fn assemble(input: impl BufRead, output: &mut impl Write) -> Result<(), std::io:
 
     // second pass: generate binary instructions
     for line in &lines {
-        let line = line.trim();
-        if line.starts_with('(') {
-            continue;
-        }
-
-        if line.starts_with('@') {
-            // A-instruction
-            let value = line.trim_start_matches('@');
-            let address = if let Ok(value) = value.parse::<u16>() {
-                // plain memory address
-                value
-            } else if let Some(address) = symbols.label(value) {
-                // existing label
-                address
-            } else {
-                // variable (whether existing or new)
-                symbols.variable(value)
-            };
-            writeln!(output, "{:016b}", address)?;
-        } else {
-            // split C-instruction into dest, comp, and jump
-            let (dest, comp, jump) = {
-                let (dest, comp) = match line.split('=').collect_vec()[..] {
-                    [comp] => ("", comp),
-                    [dest, comp] => (dest, comp),
-                    _ => panic!("more than one equal sign in instruction"),
-                };
-
-                let (comp, jump) = match comp.split(';').collect_vec()[..] {
-                    [comp] => (comp, ""),
-                    [comp, jump] => (comp, jump),
-                    _ => panic!("more than one ; in instruction"),
-                };
-
-                (dest, comp, jump)
-            };
-            writeln!(
-                output,
-                "111{}{}{}",
-                computations(comp),
-                destinations(dest),
-                jumps(jump)
-            )?;
-        };
+        line.assemble(&mut symbols, output)?;
     }
 
     Ok(())
